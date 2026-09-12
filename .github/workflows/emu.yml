@@ -7,9 +7,9 @@ on:
         required: false
         default: "latest"
       api_level:
-        description: "Android API level"
+        description: "Android API level (29 = fastest on free runners)"
         required: false
-        default: "36"
+        default: "29"
 jobs:
   emu:
     runs-on: ubuntu-latest
