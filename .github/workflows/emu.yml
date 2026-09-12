@@ -41,7 +41,7 @@ jobs:
 
       - name: Install + inject test keys
         env:
-          TEST_API_KEYS: ${{ secrets.TEST_API_KEYS }}
+          TEST_PROVIDERS: ${{ secrets.TEST_PROVIDERS }}
         run: |
           chmod +x scripts/test.sh
           scripts/test.sh

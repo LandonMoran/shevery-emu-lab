@@ -9,7 +9,7 @@ so nobody gets failure-spam while this is being iterated on.
 |---|---|
 | `TAILSCALE_AUTHKEY` | Reusable Tailscale auth key (fixed hostname `shevery-emu`) |
 | `TAILSCALE_DOMAIN` | Your tailnet domain (for the web-view URL) |
-| `TEST_API_KEYS` | Test-only provider keys, e.g. `GEMINI_KEY=... OPENROUTER_KEY=...` |
+| `TEST_PROVIDERS` | Test providers, one per line: `Name\|https://base.url/v1\|model-id\|key` |
 
 Keys arrive via env at run time and are pushed to the emulator over ADB.
 They never touch git, the APK, or logs.
