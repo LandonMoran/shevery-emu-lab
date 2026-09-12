@@ -38,7 +38,9 @@ adb wait-for-device
 # /proc/net/tcp: <ip>:<port-hex> state; $4 is state, 0A = LISTEN.
 # 5555 = 0x15B3 (port rendered big-endian in the file).
 probe5555() {
-  adb shell "awk '/:15B3 / {if (\\$4==\"0A\") found=1} END{exit !found}' /proc/net/tcp" \
+  # Listening adbd socket line: <ip>:15B3 00000000:0000 0A ...
+  # grep does the state check (0A = LISTEN), no awk quoting pitfalls.
+  adb shell "grep -q ':15B3 00000000:0000 0A ' /proc/net/tcp" \
     >/dev/null 2>&1 && echo OPEN || echo CLOSED
 }
 
