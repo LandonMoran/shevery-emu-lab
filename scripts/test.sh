@@ -126,6 +126,31 @@ else
   echo "NET-INFO mDNS: no _adb-tls-connect services advertised (expected on emulator)"
 fi
 
+echo "=== NET-EMU PHASE 7: in-guest egress + app boot ==="
+# The one genuinely-real network path: emulator NAT egresses through the
+# host NIC, so ping/DNS/TLS from INSIDE the guest traverse the actual
+# internet. This is what the app itself would do on a device.
+adb shell "ping -c 1 -W 2 8.8.8.8" >/dev/null 2>&1 \
+  && echo "NET-PASS egress: ICMP to 8.8.8.8 from guest" \
+  || echo "NET-FAIL egress: no ICMP path from guest"
+# DNS through the guest resolver (first provider host if present).
+HOST=$(grep -m1 '|' /tmp/providers.txt 2>/dev/null | cut -d'|' -f2 | sed -E 's|https?://([^/]+).*|\1|')
+[ -z "${HOST:-}" ] && HOST="dns.google"
+adb shell "ping -c 1 -W 3 $HOST" >/dev/null 2>&1 \
+  && echo "NET-PASS egress: DNS+ICMP to $HOST from guest" \
+  || echo "NET-FAIL egress: cannot resolve/reach $HOST from guest"
+# App must actually boot (this is what the whole run is validating).
+adb shell am start -n moe.shizuku.manager/.MainActivity >/dev/null 2>&1 || \
+adb shell monkey -p moe.shizuku.manager -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || true
+sleep 6
+FG=$(adb shell "dumpsys activity activities | grep -m1 'mResumedActivity'" 2>/dev/null)
+echo "$FG" | grep -qs "moe.shizuku.manager" \
+  && echo "NET-PASS app-boot: Shizuku manager in foreground on emulator" \
+  || echo "NET-WARN app-boot: activity state: $FG"
+adb logcat -d -t 200 2>/dev/null | grep -i "FATAL\|AndroidRuntime.*Exception" | head -3 \
+  && echo "NET-WARN app-boot: crash lines in logcat (above)" \
+  || echo "NET-PASS app-boot: no FATAL in recent logcat"
+
 echo "=== NET-EMU DONE ==="
 
 HOLD="${2:-0}"
