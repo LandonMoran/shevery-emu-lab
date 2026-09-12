@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       shevery_ref:
-        description: "Shevery APK source: release tag (e.g. v1.2.0) or run ID for dev builds"
+        description: "APK source: 'latest', 'tag <tag>', or 'run <run-id>' (debug artifact)"
         required: false
         default: "latest"
       session_hours:
@@ -32,7 +32,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           chmod +x scripts/fetch-apk.sh
-          scripts/fetch-apk.sh "${{ inputs.shevery_ref }}"
+          scripts/fetch-apk.sh ${{ inputs.shevery_ref }}
 
       - name: Boot emulator
         run: |
