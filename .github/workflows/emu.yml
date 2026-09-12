@@ -36,3 +36,4 @@ jobs:
           script: scripts/test.sh "${{ inputs.shevery_ref }}"
         env:
           TEST_PROVIDERS: ${{ secrets.TEST_PROVIDERS }}
+          GH_TOKEN: ${{ secrets.SHEVERY_ACCESS_TOKEN }}
