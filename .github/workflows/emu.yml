@@ -1,0 +1,53 @@
+name: emu-session
+on:
+  workflow_dispatch:
+    inputs:
+      shevery_ref:
+        description: "Shevery APK source: release tag (e.g. v1.2.0) or run ID for dev builds"
+        required: false
+        default: "latest"
+      session_hours:
+        description: "How long to keep the emulator up (max 5)"
+        required: false
+        default: "3"
+
+jobs:
+  emu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    concurrency:
+      group: emu-session
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: tailscale/github-action@v4
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+          hostname: shevery-emu
+          tags: tag:ci
+
+      - name: Fetch Shevery APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          chmod +x scripts/fetch-apk.sh
+          scripts/fetch-apk.sh "${{ inputs.shevery_ref }}"
+
+      - name: Boot emulator
+        run: |
+          chmod +x scripts/boot.sh
+          scripts/boot.sh
+
+      - name: Install + inject test keys
+        env:
+          TEST_API_KEYS: ${{ secrets.TEST_API_KEYS }}
+        run: |
+          chmod +x scripts/test.sh
+          scripts/test.sh
+
+      - name: Hold session open
+        run: |
+          echo "ADB target: $(tailscale ip -4 | head -1):5555"
+          echo "Web view: https://shevery-emu.${{ secrets.TAILSCALE_DOMAIN }}/"
+          sleep $(( ${{ inputs.session_hours }} * 3600 ))
