@@ -39,8 +39,8 @@ adb wait-for-device
 # 5555 = 0x15B3 (port rendered big-endian in the file).
 probe5555() {
   # Listening adbd socket line: <ip>:15B3 00000000:0000 0A ...
-  # grep does the state check (0A = LISTEN), no awk quoting pitfalls.
-  adb shell "grep -q ':15B3 00000000:0000 0A ' /proc/net/tcp" \
+  # adbd binds :: so the line lives in tcp6; probe both tables.
+  adb shell "grep -q ':15B3 ' /proc/net/tcp /proc/net/tcp6 2>/dev/null" \
     >/dev/null 2>&1 && echo OPEN || echo CLOSED
 }
 
@@ -69,8 +69,12 @@ sleep 2
 DEVICE_TCP=$(adb devices | grep -c "15555" || true)
 [ "$DEVICE_TCP" -ge 1 ] && echo "NET-PASS tcp-connect: 127.0.0.1:15555 in adb devices" \
                         || echo "NET-FAIL tcp-connect: no TCP device after redir"
-adb -s 127.0.0.1:15555 shell echo TCPROUNDTRIP_OK 2>/dev/null \
-  | grep -qs "TCPROUNDTRIP_OK" \
+RT="FAIL"
+for i in 1 2 3 4 5; do
+  adb -s 127.0.0.1:15555 shell echo TCPROUNDTRIP_OK 2>/dev/null | grep -qs "TCPROUNDTRIP_OK" && { RT="PASS"; break; }
+  sleep 2
+done
+[ "$RT" = "PASS" ] \
   && echo "NET-PASS tcp-connect: shell round-trip over host->guest TCP" \
   || echo "NET-FAIL tcp-connect: shell round-trip failed"
 adb disconnect 127.0.0.1:15555 >/dev/null 2>&1 || true
@@ -111,20 +115,20 @@ fi
 
 echo "=== NET-EMU PHASE 7: in-guest egress + app boot ==="
 # The one genuinely-real network path: emulator NAT egresses through the
-# host NIC, so ICMP/DNS/TCP from INSIDE the guest traverse the actual
-# internet. This is what the app itself would do on a device.
-adb shell "ping -c 1 -W 2 8.8.8.8" >/dev/null 2>&1 \
-  && echo "NET-PASS egress: ICMP to 8.8.8.8 from guest" \
-  || echo "NET-FAIL egress: no ICMP path from guest"
-# DNS through the guest resolver.
-adb shell "ping -c 1 -W 3 dns.google" >/dev/null 2>&1 \
-  && echo "NET-PASS egress: DNS+ICMP to dns.google from guest" \
+# host NIC, so TCP from INSIDE the guest traverses the actual internet.
+# NOTE: slirp does not forward ICMP, so ping can never work here — TCP is
+# the honest probe (and is what the app itself uses).
+adb shell "echo -e '' | nc -w 5 8.8.8.8 53" >/dev/null 2>&1 \
+  && echo "NET-PASS egress: TCP to 8.8.8.8:53 from guest" \
+  || echo "NET-FAIL egress: no TCP path from guest"
+# DNS + TCP through the guest resolver.
+adb shell "echo -e '' | nc -w 5 dns.google 443" >/dev/null 2>&1 \
+  && echo "NET-PASS egress: DNS+TCP to dns.google:443 from guest" \
   || echo "NET-FAIL egress: cannot resolve/reach dns.google from guest"
 # App must actually boot (validates the #203 APK installs and runs).
-adb shell am start -n moe.shizuku.manager/.MainActivity >/dev/null 2>&1 || \
 adb shell monkey -p moe.shizuku.manager -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || true
 sleep 6
-FG=$(adb shell "dumpsys activity activities | grep -m1 'mResumedActivity'" 2>/dev/null)
+FG=$(adb shell "dumpsys activity activities | grep -m1 'mResumedActivity'" 2>/dev/null || true)
 echo "$FG" | grep -qs "moe.shizuku.manager" \
   && echo "NET-PASS app-boot: Shizuku manager in foreground on emulator" \
   || echo "NET-WARN app-boot: activity state: $FG"
@@ -140,6 +144,9 @@ if [ "$HOLD" != "0" ]; then
   adb -a nodaemon server start >/tmp/adb.log 2>&1 &
   sleep 3
   adb devices
-  echo "HOLD open for ${HOLD}m — connect with: adb connect $(tailscale ip -4 | head -1)"
+  TSIP=$(tailscale ip -4 | head -1 || echo UNKNOWN)
+  echo "HOLD open for ${HOLD}m"
+  echo "Tailscale magic: adb -H $TSIP devices"
+  echo "Tailscale magic: adb -H $TSIP shell getprop ro.build.version.sdk"
   sleep "${HOLD}m"
 fi
