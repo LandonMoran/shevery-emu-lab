@@ -10,6 +10,10 @@ on:
         description: "Android API level (29 = fastest on free runners)"
         required: false
         default: "29"
+      hold_minutes:
+        description: "Park session open for manual ADB (0 = off, max ~110)"
+        required: false
+        default: "0"
 jobs:
   emu:
     runs-on: ubuntu-latest
@@ -33,7 +37,7 @@ jobs:
           arch: x86_64
           profile: pixel_6
           emulator-boot-timeout: 1800
-          script: scripts/test.sh "${{ inputs.shevery_ref }}"
+          script: scripts/test.sh "${{ inputs.shevery_ref }}" "${{ inputs.hold_minutes }}"
         env:
           TEST_PROVIDERS: ${{ secrets.TEST_PROVIDERS }}
           GH_TOKEN: ${{ secrets.SHEVERY_ACCESS_TOKEN }}

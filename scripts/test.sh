@@ -31,3 +31,12 @@ while IFS='|' read -r name base model key; do
   else echo "FAIL $name (http $code)"; FAIL=$((FAIL+1)); fi
 done < <(printf '%s\n' "${TEST_PROVIDERS:-}")
 echo "RESULT pass=$PASS fail=$FAIL"
+HOLD="${2:-0}"
+if [ "$HOLD" != "0" ]; then
+  adb kill-server 2>/dev/null || true
+  adb -a nodaemon server start >/tmp/adb.log 2>&1 &
+  sleep 3
+  adb devices
+  echo "HOLD open for ${HOLD}m — connect with: adb connect $(tailscale ip -4 | head -1)"
+  sleep "${HOLD}m"
+fi
