@@ -7,9 +7,9 @@ on:
         required: false
         default: "latest"
       api_level:
-        description: "Android API level (34 = Android 14, realistic modern baseline)"
+        description: "Android API level. 34-36 (Android 14-16) all verified with KVM; 37 unavailable (no platforms;android-37 in SDK)"
         required: false
-        default: "34"
+        default: "35"
       hold_minutes:
         description: "Park session open for manual ADB (0 = off, max ~110)"
         required: false
