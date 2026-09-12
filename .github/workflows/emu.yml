@@ -39,5 +39,4 @@ jobs:
           emulator-boot-timeout: 1800
           script: chmod +x scripts/*.sh && scripts/test.sh "${{ inputs.shevery_ref }}" "${{ inputs.hold_minutes }}"
         env:
-          TEST_PROVIDERS: ${{ secrets.TEST_PROVIDERS }}
           GH_TOKEN: ${{ secrets.SHEVERY_ACCESS_TOKEN }}

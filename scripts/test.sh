@@ -1,9 +1,7 @@
 #!/bin/bash
-# Install the APK, push test providers from secrets, run connectivity checks,
-# then emulate PR #203 wireless-ADB-over-TCP behavior as closely as an
-# emulator allows. Runs INSIDE android-emulator-runner.
-# Keys never touch git: they arrive via $TEST_PROVIDERS only.
-# Format (one per line): Name|https://base.url/v1|model-id|key
+# Install the APK, then emulate PR #203 wireless-ADB-over-TCP behavior as
+# closely as an emulator allows. Runs INSIDE android-emulator-runner.
+# PR #203 is ADB-network hardening only: no AI/provider machinery here.
 set -euo pipefail
 REF="${1:-latest}"
 MODE="latest"; ARG=""
@@ -15,23 +13,6 @@ scripts/fetch-apk.sh "$MODE" $ARG
 APK=$(ls ./apks/*.apk | head -1)
 adb install -r "$APK"
 adb shell input keyevent 82 || true
-if [ -n "${TEST_PROVIDERS:-}" ]; then
-  printf '%s\n' "$TEST_PROVIDERS" > /tmp/providers.txt
-  adb push /tmp/providers.txt /data/local/tmp/providers.txt
-  shred -u /tmp/providers.txt
-  adb shell am broadcast -a moe.shizuku.manager.TEST_KEYS \
-    --es file /data/local/tmp/providers.txt
-  sleep 3
-fi
-PASS=0; FAIL=0
-while IFS='|' read -r name base model key; do
-  [ -z "${name:-}" ] && continue
-  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 \
-    -H "Authorization: Bearer $key" "$base/models")
-  if [ "$code" = "200" ]; then echo "PASS $name"; PASS=$((PASS+1));
-  else echo "FAIL $name (http $code)"; FAIL=$((FAIL+1)); fi
-done < <(printf '%s\n' "${TEST_PROVIDERS:-}")
-echo "RESULT pass=$PASS fail=$FAIL"
 
 # ============================================================
 # NETWORK-EMULATION PHASE (PR #203: TCP-mode ADB lifecycle)
@@ -57,7 +38,7 @@ adb wait-for-device
 # /proc/net/tcp: <ip>:<port-hex> state; $4 is state, 0A = LISTEN.
 # 5555 = 0x15B3 (port rendered big-endian in the file).
 probe5555() {
-  adb shell "awk '/:15B3 / {if (\$4==\"0A\") found=1} END{exit !found}' /proc/net/tcp" \
+  adb shell "awk '/:15B3 / {if (\\$4==\"0A\") found=1} END{exit !found}' /proc/net/tcp" \
     >/dev/null 2>&1 && echo OPEN || echo CLOSED
 }
 
@@ -128,18 +109,16 @@ fi
 
 echo "=== NET-EMU PHASE 7: in-guest egress + app boot ==="
 # The one genuinely-real network path: emulator NAT egresses through the
-# host NIC, so ping/DNS/TLS from INSIDE the guest traverse the actual
+# host NIC, so ICMP/DNS/TCP from INSIDE the guest traverse the actual
 # internet. This is what the app itself would do on a device.
 adb shell "ping -c 1 -W 2 8.8.8.8" >/dev/null 2>&1 \
   && echo "NET-PASS egress: ICMP to 8.8.8.8 from guest" \
   || echo "NET-FAIL egress: no ICMP path from guest"
-# DNS through the guest resolver (first provider host if present).
-HOST=$(grep -m1 '|' /tmp/providers.txt 2>/dev/null | cut -d'|' -f2 | sed -E 's|https?://([^/]+).*|\1|')
-[ -z "${HOST:-}" ] && HOST="dns.google"
-adb shell "ping -c 1 -W 3 $HOST" >/dev/null 2>&1 \
-  && echo "NET-PASS egress: DNS+ICMP to $HOST from guest" \
-  || echo "NET-FAIL egress: cannot resolve/reach $HOST from guest"
-# App must actually boot (this is what the whole run is validating).
+# DNS through the guest resolver.
+adb shell "ping -c 1 -W 3 dns.google" >/dev/null 2>&1 \
+  && echo "NET-PASS egress: DNS+ICMP to dns.google from guest" \
+  || echo "NET-FAIL egress: cannot resolve/reach dns.google from guest"
+# App must actually boot (validates the #203 APK installs and runs).
 adb shell am start -n moe.shizuku.manager/.MainActivity >/dev/null 2>&1 || \
 adb shell monkey -p moe.shizuku.manager -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || true
 sleep 6
