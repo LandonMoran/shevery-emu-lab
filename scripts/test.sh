@@ -1,18 +1,33 @@
 #!/bin/bash
 # Install the APK, push test providers from secrets, run connectivity checks.
+# Runs INSIDE android-emulator-runner: local adb, emulator already booted.
 # Keys never touch git: they arrive via $TEST_PROVIDERS only.
-# Format (one per line): Name|https://base.url/v1|model-id|api-key
+# Format (one per line): Name|https://base.url/v1|model-id|key
 set -euo pipefail
+REF="${1:-latest}"
+MODE="latest"; ARG=""
+case "$REF" in
+  run\ *) MODE="run"; ARG="${REF#run }" ;;
+  tag\ *) MODE="tag"; ARG="${REF#tag }" ;;
+esac
+scripts/fetch-apk.sh "$MODE" $ARG
 APK=$(ls ./apks/*.apk | head -1)
-docker exec android adb install -r "/work/$APK"
+adb install -r "$APK"
+adb shell input keyevent 82 || true
 if [ -n "${TEST_PROVIDERS:-}" ]; then
-  echo "$TEST_PROVIDERS" | docker exec -i android \
-    sh -c 'cat > /data/local/tmp/test-providers.txt'
-  docker exec android adb shell am broadcast \
-    -a moe.shizuku.manager.TEST_KEYS --es file /data/local/tmp/test-providers.txt
-  sleep 5
-  docker exec android logcat -d 2>/dev/null | grep "TestKeys" | tail -5
+  printf '%s\n' "$TEST_PROVIDERS" > /tmp/providers.txt
+  adb push /tmp/providers.txt /data/local/tmp/providers.txt
+  shred -u /tmp/providers.txt
+  adb shell am broadcast -a moe.shizuku.manager.TEST_KEYS \
+    --es file /data/local/tmp/providers.txt
+  sleep 3
 fi
-# Screenshot pull works headless:
-docker exec android adb exec-out screencap -p > boot-check.png
-echo "wrote boot-check.png"
+PASS=0; FAIL=0
+while IFS='|' read -r name base model key; do
+  [ -z "${name:-}" ] && continue
+  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 \
+    -H "Authorization: Bearer $key" "$base/models")
+  if [ "$code" = "200" ]; then echo "PASS $name"; PASS=$((PASS+1));
+  else echo "FAIL $name (http $code)"; FAIL=$((FAIL+1)); fi
+done < <(printf '%s\n' "${TEST_PROVIDERS:-}")
+echo "RESULT pass=$PASS fail=$FAIL"

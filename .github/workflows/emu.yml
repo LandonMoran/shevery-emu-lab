@@ -6,48 +6,33 @@ on:
         description: "APK source: 'latest', 'tag <tag>', or 'run <run-id>' (debug artifact)"
         required: false
         default: "latest"
-      session_hours:
-        description: "How long to keep the emulator up (max 5)"
+      api_level:
+        description: "Android API level"
         required: false
-        default: "3"
-
+        default: "36"
 jobs:
   emu:
     runs-on: ubuntu-latest
-    timeout-minutes: 330
-    concurrency:
-      group: emu-session
-      cancel-in-progress: false
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
-
-      - uses: tailscale/github-action@v4
+      - name: Tailscale
+        uses: tailscale/github-action@v4
         with:
           authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
-          hostname: shevery-emu
-          tags: tag:ci
-
-      - name: Fetch Shevery APK
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Enable KVM
         run: |
-          chmod +x scripts/fetch-apk.sh
-          scripts/fetch-apk.sh ${{ inputs.shevery_ref }}
-
-      - name: Boot emulator
-        run: |
-          chmod +x scripts/boot.sh
-          scripts/boot.sh
-
-      - name: Install + inject test keys
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+      - name: Run tests on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ inputs.api_level }}
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          emulator-boot-timeout: 1800
+          script: scripts/test.sh "${{ inputs.shevery_ref }}"
         env:
           TEST_PROVIDERS: ${{ secrets.TEST_PROVIDERS }}
-        run: |
-          chmod +x scripts/test.sh
-          scripts/test.sh
-
-      - name: Hold session open
-        run: |
-          echo "ADB target: $(tailscale ip -4 | head -1):5555"
-          echo "Web view: https://shevery-emu.${{ secrets.TAILSCALE_DOMAIN }}/"
-          sleep $(( ${{ inputs.session_hours }} * 3600 ))
