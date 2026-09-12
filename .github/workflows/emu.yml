@@ -7,9 +7,9 @@ on:
         required: false
         default: "latest"
       api_level:
-        description: "Android API level (29 = fastest on free runners)"
+        description: "Android API level (34 = Android 14, realistic modern baseline)"
         required: false
-        default: "29"
+        default: "34"
       hold_minutes:
         description: "Park session open for manual ADB (0 = off, max ~110)"
         required: false
