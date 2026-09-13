@@ -131,7 +131,6 @@ install_file() { # install_file <src> <dst-rel>
   adb shell "run-as $PKG sh -c 'cat > $dst'" < "$src" || { fail "install file $dst"; return 1; }
 }
 
-MODZIP=$(cd /tmp/module-src && zip -qr /dev/stdout . | base64 -w0)  # not used on device; see below
 # Stream every module file into app-private storage
 ( cd /tmp/module-src && find . -type f ) | while read -r f; do
   rel="${f#./}"
@@ -183,7 +182,6 @@ adb shell "mkdir -p $DOWNLOAD/subtest" 2>/dev/null
 adb shell "printf 'garbage' > $DOWNLOAD/subtest/nested.png" 2>/dev/null
 # collision helper: pre-existing target in Images so the move renames to _1
 adb shell "mkdir -p '$DOWNLOAD/! - Images'" 2>/dev/null
-adb shell "mkdir -p '$DOWNLOAD/adversary'" 2>/dev/null
 adb shell "printf 'pre-existing' > '$DOWNLOAD/! - Images/dup.png'" 2>/dev/null
 adb shell "printf 'garbage' > $DOWNLOAD/dup.png" 2>/dev/null
 
@@ -220,11 +218,17 @@ verify_moved "sheet.xlsx"     "$DOWNLOAD/! - Spreadsheets"
 verify_moved "clip.mp4"       "$DOWNLOAD/! - Videos"
 verify_moved "song.mp3"       "$DOWNLOAD/! - Audio"
 verify_moved "data.zip"       "$DOWNLOAD/! - Archives"
-verify_moved "dup.png"        "$DOWNLOAD/adversary" # actual: dup_1.png in Images
-
-adb shell "[ -f '$DOWNLOAD/! - Images/dup_1.png' ]" 2>/dev/null && \
-  pass "collision rename: dup_1.png in Images" || \
+# dup.png: pre-existing Images/dup.png exists -> collision rename to dup_1.png
+if adb shell "[ -f '$DOWNLOAD/! - Images/dup_1.png' ]" 2>/dev/null; then
+  pass "collision rename: dup_1.png in Images"
+else
   fail "collision rename: dup_1.png missing"
+fi
+if adb shell "[ ! -f $DOWNLOAD/dup.png ]" 2>/dev/null; then
+  pass "orig dup.png no longer at root"
+else
+  fail "dup.png still at root after collision move"
+fi
 
 # unmapped / skipped must remain at root
 for stay in app.apk partial.crdownload .hidden; do
