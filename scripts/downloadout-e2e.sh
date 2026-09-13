@@ -25,7 +25,7 @@ chk() { # chk <label> <test-expr...>
 
 adb_run() { adb shell "$@"; }
 
-# ---- helper: find tap-center of the FIRST node whose text/resource-id matches ----
+# ---- helper: find tap-center; exact text match wins, else regex fallback ----
 find_bounds() { # find_bounds <pattern>  -> prints "x y" or empty
   python3 - "$1" <<'PYEOF'
 import re, sys, xml.etree.ElementTree as ET
@@ -34,16 +34,29 @@ try:
     tree = ET.parse('/tmp/ui.xml')
 except Exception:
     sys.exit(1)
+
+def center(el):
+    b = el.get('bounds', '')
+    m = re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', b)
+    if m:
+        return (int(m.group(1)) + int(m.group(3))) // 2, (int(m.group(2)) + int(m.group(4))) // 2
+    return None
+
+# pass 1: exact text == pat
+for el in tree.iter('node'):
+    if el.get('text') == pat:
+        c = center(el)
+        if c:
+            print(*c)
+            sys.exit(0)
+# pass 2: regex on text or resource-id
 for el in tree.iter('node'):
     text = el.get('text') or ''
     rid  = el.get('resource-id') or ''
     if re.search(pat, text) or re.search(pat, rid):
-        b = el.get('bounds', '')
-        m = re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', b)
-        if m:
-            x = (int(m.group(1)) + int(m.group(3))) // 2
-            y = (int(m.group(2)) + int(m.group(4))) // 2
-            print(x, y)
+        c = center(el)
+        if c:
+            print(*c)
             sys.exit(0)
 sys.exit(1)
 PYEOF
