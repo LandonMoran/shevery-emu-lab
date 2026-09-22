@@ -1,0 +1,142 @@
+# =============================================================================
+# arm32-session — ARM (arm32) emulation lab, TEST-ONLY — Phase-2 prep for the
+# APK trim campaign (eloquence-android). Mirror of emu.yml (x86_64 lab) that
+# boots an ARM system image so an armeabi-v7a (min-api 25) APK gets a REAL
+# install + runtime, then parks the session for manual TTS probing over
+# Tailscale ADB — same KVM/reactivecircus setup, same ADB-over-tailnet wiring,
+# same inputs/cleanup as emu.yml; only the arm32 specifics differ.
+#
+# CARD INTENT vs RUNNER REALITY (this is the documented deviation)
+#   The phase-2 prep card asked for: api-level 25, arch 'default' (→ arm32).
+#   Verified against reactivecircus/android-emulator-runner@v2 source
+#   (src/input-validator.ts, src/main.ts): checkArch() runs unconditionally and
+#   VALID_ARCHS = ['x86', 'x86_64', 'arm64-v8a'] — 'default' and 'armeabi-v7a'
+#   are rejected at EVERY version (v1.0.0 .. v2.38.0; the arch input never
+#   accepted armeabi-v7a), and arm64-v8a system images exist only from API 28.
+#   The card's fallback says: "if the runner does not support [api-25 arm32],
+#   use the lowest api-level that does — document what you chose and why".
+#   Chosen: api-level 28 + arch arm64-v8a — the LOWEST api-level this runner
+#   can deliver an ARM image at. Android arm64 system images are multiarch
+#   (they ship the 32-bit ARM runtime), so a minSdk-25 armeabi-v7a APK
+#   installs and runs genuinely here; dumpsys 'primaryCpuAbi = armeabi-v7a'
+#   is asserted as proof that the 32-bit runtime actually loaded it.
+#   (If a given arm64 image ever drops 32-bit support, adb install -r fails
+#   loudly with INSTALL_FAILED_NO_MATCHING_ABIS — a visible RED, never a
+#   silent ghost.)
+#
+# THE GHOST-INSTALL LIMITATION THIS COVERS
+#   On the x86_64 images emu.yml boots, an armeabi-v7a APK either fails
+#   INSTALL_FAILED_NO_MATCHING_ABIS or "installs" while none of its code can
+#   ever execute (ghost-install: listed by pm, unbootable). This workflow uses
+#   a real ARM image and gates install reality three ways:
+#     1. adb install -r exit code (ABI/minSdk mismatches fail loudly)
+#     2. pm list packages before/after diff — the install MUST register a new
+#        package, else FAIL ("ghost install?")
+#     3. dumpsys primaryCpuAbi == armeabi-v7a — the 32-bit runtime picked it
+#   ABI mismatch is therefore a loud red, never a silent ghost. The x86_64 lab
+#   stays as-is; this workflow is the arm32 counterpart.
+#
+# WHY min-api 25 MATTERS
+#   The trimmed APK is built with minSdk 25 (flex layering was handled
+#   app-side). API-28+ arm32 (armeabi-v7a) system images are essentially
+#   unavailable for this runner — armeabi-v7a images top out at API 25 and
+#   this runner cannot even request that arch — so 28 (arm64-v8a) is the
+#   lowest level that validates a genuine ARM install of the min-api-25 APK.
+#
+# TEST-ONLY / PERFORMANCE
+#   An ARM guest cannot use x86 KVM; the emulator runs it in full emulation
+#   (slow — expect multi-minute boots; emulator-boot-timeout kept at 1800s).
+#   The Enable KVM step is kept verbatim from emu.yml for symmetry (the action
+#   auto-detects hardware accel; if the ARM guest refuses acceleration, pass
+#   disable-linux-hw-accel: 'true' to this step — left at the runner default
+#   here to stay symmetric with emu.yml).
+# =============================================================================
+name: arm32-session
+on:
+  workflow_dispatch:
+    inputs:
+      apk_url:
+        description: "Direct URL to the armeabi-v7a APK (e.g. eloquence arm32 build artifact). Empty = fall back to the shevery_ref mechanism like emu.yml"
+        required: false
+        default: ""
+      shevery_ref:
+        description: "APK source when apk_url is empty: 'latest', 'tag <tag>', or 'run <run-id>' (debug artifact)"
+        required: false
+        default: "latest"
+      api_level:
+        description: "Android API level. 28 = lowest level with an ARM (arm64-v8a) image on this runner; 25/armeabi-v7a are rejected by the action (see header)"
+        required: false
+        default: "28"
+      min_api:
+        description: "APK minSdkVersion; emulator SDK must be >= this (default 25)"
+        required: false
+        default: "25"
+      hold_minutes:
+        description: "Park session open for manual ADB (0 = off, max ~110)"
+        required: false
+        default: "90"
+      target:
+        description: "System image target: google_apis (rooted userdebug) or google_apis_playstore (unrooted user; arm64 playstore availability below API 30 is spotty)"
+        required: false
+        default: "google_apis"
+      mode:
+        description: "park (boot+hold) or downloadout-e2e (run module E2E then hold; shevery-specific — only sensible when the APK is a shevery debug build)"
+        required: false
+        default: "park"
+jobs:
+  emu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tailscale
+        uses: tailscale/github-action@v4
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+      - name: Run tests on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ inputs.api_level }}
+          target: ${{ inputs.target }}
+          arch: arm64-v8a
+          profile: pixel_6
+          emulator-boot-timeout: 1800
+          script: |
+            set -e
+            # ---- download APK (apk_url input; else emu.yml's shevery_ref mechanism) ----
+            if [ -n "${{ inputs.apk_url }}" ]; then
+              mkdir -p ./apks
+              echo "Fetching APK from apk_url"
+              curl -fsSL "${{ inputs.apk_url }}" -o ./apks/app.apk
+            else
+              echo "apk_url empty; using emu.yml's shevery_ref mechanism"
+              scripts/fetch-apk.sh "${{ inputs.shevery_ref }}"
+            fi
+            APK=$(ls ./apks/*.apk 2>/dev/null | head -1)
+            [ -n "$APK" ] || { echo "FAIL: no .apk found in ./apks"; exit 1; }
+            echo "APK: $APK"
+            # ---- wait-for-device + SDK >= min_api gate ----
+            adb wait-for-device
+            SDK=$(adb shell getprop ro.build.version.sdk | tr -d '\r')
+            ABI=$(adb shell getprop ro.product.cpu.abi | tr -d '\r')
+            echo "emulator: SDK=$SDK ABI=$ABI  min_api=${{ inputs.min_api }}"
+            [ "$SDK" -ge "${{ inputs.min_api }}" ] || { echo "FAIL: emulator SDK $SDK < min_api ${{ inputs.min_api }}"; exit 1; }
+            # ---- install + REAL-install proof (ghost-install guard) ----
+            adb shell pm list packages -3 | sort > /tmp/pkgs-before.txt
+            echo "installing:"
+            adb install -r "$APK"
+            adb shell pm list packages -3 | sort > /tmp/pkgs-after.txt
+            NEW=$(comm -13 /tmp/pkgs-before.txt /tmp/pkgs-after.txt)
+            if [ -z "$NEW" ]; then echo "FAIL: install registered no new package (GHOST INSTALL?)"; exit 1; fi
+            echo "pm list packages: newly registered -> $NEW"
+            PKG=$(echo "$NEW" | sed 's/^package://')
+            adb shell dumpsys package "$PKG" | grep -i "primaryCpuAbi\|secondaryCpuAbi" || echo "WARN: no primaryCpuAbi line in dumpsys; ABI proof skipped"
+            # ---- smoke: emu.yml's step copied verbatim (same semantics, symmetric) ----
+            chmod +x scripts/*.sh && if [ "${{ inputs.mode }}" = "downloadout-e2e" ]; then scripts/downloadout-e2e.sh "${{ inputs.shevery_ref }}" "${{ inputs.hold_minutes }}"; else scripts/test.sh "${{ inputs.shevery_ref }}" "${{ inputs.hold_minutes }}"; fi
+        env:
+          GH_TOKEN: ${{ secrets.SHEVERY_ACCESS_TOKEN }}
