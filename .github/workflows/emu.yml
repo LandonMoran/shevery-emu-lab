@@ -15,7 +15,7 @@ on:
         required: false
         default: "90"
       target:
-        description: "System image target: google_apis (rooted userdebug) or google_apis_playstore (unrooted user)"
+        description: "System image target: google_apis (rooted userdebug), google_apis_playstore (unrooted user), default (bare AOSP(, aosp_atd, google_atd"
         required: false
         default: "google_apis_playstore"
       mode:
